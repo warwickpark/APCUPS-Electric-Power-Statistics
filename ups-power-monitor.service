@@ -1,0 +1,16 @@
+[Unit]
+Description=UPS Power Monitor (apcaccess)
+After=apcupsd.service
+Wants=apcupsd.service
+
+[Service]
+User=warwick
+WorkingDirectory=/home/warwick/ups-power-monitor
+ExecStart=/usr/bin/python3 /home/warwick/ups-power-monitor/ups_power_monitor.py collect --port 8080 --lcd
+Restart=on-failure
+RestartSec=10
+# UPS가 개시한 시스템 셧다운을 지연시키지 않도록 종료 대기 상한
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

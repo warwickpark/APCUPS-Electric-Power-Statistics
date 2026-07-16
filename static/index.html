@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UPS 전력 모니터</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink-2:     #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --axis:      #c3c2b7;
+    --border:    rgba(11,11,11,0.10);
+    --series:    #2a78d6;
+    --st-good:   #0ca30c;
+    --st-serious:#ec835a;
+    --st-crit:   #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink-2:     #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --axis:      #383835;
+      --border:    rgba(255,255,255,0.10);
+      --series:    #3987e5;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px; max-width: 980px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  header h1 { font-size: 20px; font-weight: 650; }
+  #updated { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+  .chip {
+    font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+  }
+  .chip::before { content: "●"; margin-right: 6px; font-size: 10px; color: var(--muted); }
+  .chip.good::before   { color: var(--st-good); }
+  .chip.onbatt::before { color: var(--st-serious); }
+  .chip.crit::before   { color: var(--st-crit); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .tile .label { font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
+  .tile .value { font-size: 26px; font-weight: 600; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+  .tile.hero .value { font-size: 48px; letter-spacing: -0.5px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 12px; position: relative;
+  }
+  .card h2 { font-size: 13.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 10px; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; }
+  .chart .empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+
+  svg text { font-family: inherit; font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  svg .gridline { stroke: var(--grid); stroke-width: 1; }
+  svg .baseline { stroke: var(--axis); stroke-width: 1; }
+  svg .line { stroke: var(--series); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+  svg .area { fill: var(--series); opacity: 0.1; }
+  svg .bar  { fill: var(--series); }
+  svg .dot  { fill: var(--series); stroke: var(--surface); stroke-width: 2; }
+  svg .crosshair { stroke: var(--axis); stroke-width: 1; }
+  svg .end-label { fill: var(--ink-2); font-weight: 600; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 10; display: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12); padding: 7px 10px; font-size: 12px;
+    color: var(--ink-2); white-space: nowrap;
+  }
+  .tooltip b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>UPS 전력 모니터</h1>
+  <span class="chip" id="status-chip">연결 중…</span>
+  <span id="updated"></span>
+</header>
+
+<div class="tiles">
+  <div class="tile hero">
+    <div class="label">현재 전력</div>
+    <div class="value"><span id="now-w">–</span><small>W</small></div>
+  </div>
+  <div class="tile">
+    <div class="label">UPS 부하</div>
+    <div class="value"><span id="now-load">–</span><small>%</small></div>
+  </div>
+  <div class="tile">
+    <div class="label">오늘 사용량</div>
+    <div class="value"><span id="today-kwh">–</span><small>kWh</small></div>
+  </div>
+  <div class="tile">
+    <div class="label">이번 달 누적 <span id="month-name"></span></div>
+    <div class="value"><span id="month-kwh">–</span><small>kWh</small></div>
+  </div>
+</div>
+
+<div class="card"><h2>최근 24시간 전력 추이 — 시간별 평균 (W)</h2><div class="chart" id="chart-hourly"></div></div>
+<div class="card"><h2>일별 사용량 — 최근 30일 (kWh)</h2><div class="chart" id="chart-daily"></div></div>
+<div class="card"><h2>월별 사용량 — 최근 12개월 (kWh)</h2><div class="chart" id="chart-monthly"></div></div>
+
+<footer>전력(W) = 정격 650W × UPS 부하율. apcaccess 샘플의 시간 적분으로 kWh 산출.</footer>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const fetchJSON = url => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/* 깔끔한 y축 눈금: 0부터 최댓값까지 3~5개 */
+function niceTicks(maxVal) {
+  if (maxVal <= 0) maxVal = 1;
+  const rough = maxVal / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * pow).find(s => maxVal / s <= 5);
+  const ticks = [];
+  for (let v = 0; v <= maxVal + 1e-9; v += step) ticks.push(v);
+  if (ticks[ticks.length - 1] < maxVal) ticks.push(ticks[ticks.length - 1] + step);
+  return ticks;
+}
+
+function fmt(v, digits) {
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+}
+
+function makeTooltip(container) {
+  let tip = container.querySelector(".tooltip");
+  if (!tip) { tip = document.createElement("div"); tip.className = "tooltip"; container.appendChild(tip); }
+  return tip;
+}
+function moveTip(tip, container, x, y, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  const cw = container.clientWidth, tw = tip.offsetWidth;
+  tip.style.left = Math.min(Math.max(0, x - tw / 2), cw - tw) + "px";
+  tip.style.top = Math.max(0, y - tip.offsetHeight - 12) + "px";
+}
+
+const PAD = { l: 44, r: 16, t: 10, b: 22 };
+const H = 200;
+
+function frame(container, ticks, unitDigits) {
+  container.querySelectorAll("svg,.empty").forEach(n => n.remove());
+  const W = Math.max(container.clientWidth, 320);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H });
+  container.appendChild(svg);
+  const y = v => PAD.t + (H - PAD.t - PAD.b) * (1 - v / ticks[ticks.length - 1]);
+  for (const t of ticks) {
+    el("line", { x1: PAD.l, x2: W - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? "baseline" : "gridline" }, svg);
+    const txt = el("text", { x: PAD.l - 8, y: y(t) + 4, "text-anchor": "end" }, svg);
+    txt.textContent = fmt(t, unitDigits);
+  }
+  return { svg, W, y };
+}
+
+function showEmpty(container) {
+  container.querySelectorAll("svg,.empty").forEach(n => n.remove());
+  const d = document.createElement("div");
+  d.className = "empty"; d.textContent = "아직 데이터가 없습니다";
+  container.appendChild(d);
+}
+
+/* ── 라인 차트 (24시간 전력) ───────────────────────────── */
+function lineChart(container, data) {
+  if (!data.length) return showEmpty(container);
+  const ticks = niceTicks(Math.max(...data.map(d => d.avg_w)));
+  const { svg, W, y } = frame(container, ticks, 0);
+  const x = i => PAD.l + (W - PAD.l - PAD.r) * (data.length === 1 ? 0.5 : i / (data.length - 1));
+
+  // x축 라벨: 3시간 간격
+  data.forEach((d, i) => {
+    const h = new Date(d.t * 1000).getHours();
+    if (h % 3 === 0 && i !== data.length - 1) {
+      const txt = el("text", { x: x(i), y: H - 6, "text-anchor": "middle" }, svg);
+      txt.textContent = h + "시";
+    }
+  });
+
+  const pts = data.map((d, i) => `${x(i)},${y(d.avg_w)}`);
+  el("path", { class: "area", d: `M${pts.join("L")}L${x(data.length - 1)},${y(0)}L${x(0)},${y(0)}Z` }, svg);
+  el("path", { class: "line", d: `M${pts.join("L")}` }, svg);
+
+  const last = data[data.length - 1];
+  el("circle", { class: "dot", cx: x(data.length - 1), cy: y(last.avg_w), r: 4.5 }, svg);
+  const lbl = el("text", { class: "end-label", x: x(data.length - 1) - 8, y: y(last.avg_w) - 10, "text-anchor": "end" }, svg);
+  lbl.textContent = fmt(last.avg_w, 0) + " W";
+
+  // 크로스헤어 + 툴팁
+  const tip = makeTooltip(container);
+  const ch = el("line", { class: "crosshair", y1: PAD.t, y2: H - PAD.b, visibility: "hidden" }, svg);
+  const chDot = el("circle", { class: "dot", r: 4.5, visibility: "hidden" }, svg);
+  svg.addEventListener("mousemove", ev => {
+    const rect = svg.getBoundingClientRect();
+    const mx = (ev.clientX - rect.left) * (W / rect.width);
+    let i = Math.round((mx - PAD.l) / (W - PAD.l - PAD.r) * (data.length - 1));
+    i = Math.max(0, Math.min(data.length - 1, i));
+    const d = data[i];
+    ch.setAttribute("x1", x(i)); ch.setAttribute("x2", x(i)); ch.setAttribute("visibility", "visible");
+    chDot.setAttribute("cx", x(i)); chDot.setAttribute("cy", y(d.avg_w)); chDot.setAttribute("visibility", "visible");
+    const dt = new Date(d.t * 1000);
+    moveTip(tip, container, x(i) * (rect.width / W), y(d.avg_w) * (rect.height / H),
+      `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}시 &nbsp; 평균 <b>${fmt(d.avg_w, 1)} W</b>` +
+      `<br>최소 ${fmt(d.min_w, 1)} · 최대 ${fmt(d.max_w, 1)} W · ${fmt(d.kwh * 1000, 0)} Wh`);
+  });
+  svg.addEventListener("mouseleave", () => {
+    tip.style.display = "none";
+    ch.setAttribute("visibility", "hidden"); chDot.setAttribute("visibility", "hidden");
+  });
+}
+
+/* ── 막대 차트 (일별/월별 kWh) ─────────────────────────── */
+function barChart(container, data, labelFn, tipFn, kwhDigits) {
+  if (!data.length) return showEmpty(container);
+  const ticks = niceTicks(Math.max(...data.map(d => d.kwh)));
+  const { svg, W, y } = frame(container, ticks, kwhDigits);
+  const slot = (W - PAD.l - PAD.r) / data.length;
+  const bw = Math.min(24, Math.max(3, slot - 2));  // ≤24px, 인접 막대 사이 2px 이상 간격
+
+  const labelEvery = Math.ceil(data.length / 10);
+  const tip = makeTooltip(container);
+
+  data.forEach((d, i) => {
+    const cx = PAD.l + slot * (i + 0.5);
+    const h = y(0) - y(d.kwh);
+    const r = Math.min(4, h, bw / 2);  // 상단(데이터 끝) 4px 라운드, 베이스라인은 직각
+    const xl = cx - bw / 2;
+    el("path", { class: "bar", d:
+      `M${xl},${y(0)} L${xl},${y(d.kwh) + r} Q${xl},${y(d.kwh)} ${xl + r},${y(d.kwh)}` +
+      ` L${xl + bw - r},${y(d.kwh)} Q${xl + bw},${y(d.kwh)} ${xl + bw},${y(d.kwh) + r}` +
+      ` L${xl + bw},${y(0)} Z` }, svg);
+
+    if (i % labelEvery === 0) {
+      const txt = el("text", { x: cx, y: H - 6, "text-anchor": "middle" }, svg);
+      txt.textContent = labelFn(d);
+    }
+    // 히트 영역(막대보다 넓게) + 툴팁
+    const hit = el("rect", { x: PAD.l + slot * i, y: PAD.t, width: slot, height: H - PAD.t - PAD.b, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", () => {
+      const rect = svg.getBoundingClientRect();
+      moveTip(tip, container, cx * (rect.width / W), y(d.kwh) * (rect.height / H), tipFn(d));
+    });
+    hit.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  });
+
+  // 마지막(현재) 막대 값 라벨
+  const last = data[data.length - 1];
+  const lx = PAD.l + slot * (data.length - 0.5);
+  const lbl = el("text", { class: "end-label", x: Math.min(lx, W - PAD.r - 4), y: y(last.kwh) - 6, "text-anchor": "middle" }, svg);
+  lbl.textContent = fmt(last.kwh, kwhDigits);
+}
+
+/* ── 데이터 갱신 ───────────────────────────────────────── */
+const STATUS_MAP = [
+  [/ONBATT/, ["onbatt", "배터리 구동"]],
+  [/ONLINE/, ["good", "정상 (상용전원)"]],
+  [/COMMLOST|SHUTTING/, ["crit", "통신 두절"]],
+];
+
+async function refreshRealtime() {
+  try {
+    const d = await fetchJSON("/api/realtime");
+    if (d.ts == null) { $("status-chip").textContent = "수집 대기 중"; return; }
+    $("now-w").textContent = fmt(d.watts, 1);
+    $("now-load").textContent = fmt(d.loadpct, 1);
+    const age = Date.now() / 1000 - d.ts;
+    $("updated").textContent = age > 120
+      ? `⚠ 마지막 샘플 ${Math.round(age / 60)}분 전 — 수집기 확인 필요`
+      : `갱신 ${new Date(d.ts * 1000).toLocaleTimeString("ko-KR")}`;
+    const chip = $("status-chip");
+    const m = STATUS_MAP.find(([re]) => re.test(d.status || ""));
+    chip.className = "chip " + (m ? m[1][0] : "");
+    chip.textContent = m ? m[1][1] : (d.status || "상태 미상");
+  } catch (e) {
+    $("status-chip").className = "chip crit";
+    $("status-chip").textContent = "서버 연결 실패";
+  }
+}
+
+let cache = { hourly: [], daily: [], monthly: [] };
+
+async function refreshCharts() {
+  try {
+    const [hourly, daily, monthly, summary] = await Promise.all([
+      fetchJSON("/api/hourly?hours=24"), fetchJSON("/api/daily?days=30"),
+      fetchJSON("/api/monthly?months=12"), fetchJSON("/api/summary"),
+    ]);
+    cache = { hourly, daily, monthly };
+    $("today-kwh").textContent = fmt(summary.today_kwh, 2);
+    $("month-kwh").textContent = fmt(summary.month_kwh, 1);
+    $("month-name").textContent = `(${+summary.month.slice(5)}월)`;
+    renderAll();
+  } catch (e) { /* 다음 주기에 재시도 */ }
+}
+
+function renderAll() {
+  lineChart($("chart-hourly"), cache.hourly);
+  barChart($("chart-daily"), cache.daily,
+    d => `${+d.t.slice(5, 7)}/${+d.t.slice(8)}`,
+    d => `${d.t} &nbsp; <b>${fmt(d.kwh, 3)} kWh</b><br>평균 ${fmt(d.avg_w, 1)} W · 최소 ${fmt(d.min_w, 1)} · 최대 ${fmt(d.max_w, 1)} W`,
+    2);
+  const n = new Date();
+  const thisMonth = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+  barChart($("chart-monthly"), cache.monthly,
+    d => `${+d.t.slice(5)}월`,
+    d => `${d.t}${d.t === thisMonth ? " (진행 중)" : ""} &nbsp; <b>${fmt(d.kwh, 2)} kWh</b><br>평균 ${fmt(d.avg_w, 1)} W`,
+    0);
+}
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer); resizeTimer = setTimeout(renderAll, 150);
+});
+
+refreshRealtime(); refreshCharts();
+setInterval(refreshRealtime, 5000);
+setInterval(refreshCharts, 60000);
+</script>
+</body>
+</html>

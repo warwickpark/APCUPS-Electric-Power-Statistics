@@ -1,0 +1,14 @@
+# 런타임 산출물 (수집기가 실행되면서 생성 — 저장소에 포함하지 않음)
+ups_power.db
+ups_power.db-wal
+ups_power.db-shm
+ups_power.db.corrupt-*
+backups/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
