@@ -35,7 +35,7 @@ apcaccess ──(LOADPCT, NOMPOWER)──▶ 전력(W) 계산 ──▶ SQLite �
 
 ## 요구 사항
 
-- 라즈베리파이 / Debian 계열 + **apcupsd**(`apcaccess` 명령 제공)
+- 라즈베리파이 / Orange Pi 등 SBC + Debian 계열 + **apcupsd**(`apcaccess` 명령 제공)
 - **Python 3** (표준 라이브러리만 사용)
 - (선택) 16x2 I2C 문자 LCD + `RPLCD` — `--lcd` 옵션을 쓸 때만
 
@@ -50,7 +50,8 @@ cd ~/ups-power-monitor
 python3 ups_power_monitor.py status
 
 # 3. (LCD 사용 시) RPLCD 설치 + 기존 LCD 스크립트 중지
-python3 -c "import RPLCD" || pip3 install RPLCD
+#    최신 배포판은 PEP 668(EXTERNALLY-MANAGED)로 pip를 막으므로 --user 설치를 쓴다
+python3 -c "import RPLCD" || pip3 install --user --break-system-packages RPLCD smbus2
 
 # 4. systemd 서비스 등록
 sudo cp ups-power-monitor.service /etc/systemd/system/
@@ -94,14 +95,71 @@ systemctl status ups-power-monitor
 | 2 | `BATTERY %` / `LEFT (min)` |
 | 3 | `AC V` / `BATT V` |
 | 4 | `IP:` / IP 주소 |
-| 5 | 날짜·시각 / `RPi TEMP` |
+| 5 | 날짜·시각 / `CPU TEMP` |
 | 6 | **`POWER W`** / **`TODAY kWh`** |
 | 7 | **`MONTH`** / **누적 kWh** |
 
-- 옵션: `--lcd-address 0x20` · `--lcd-port 1` · `--lcd-expander PCF8574`
+- 옵션: `--lcd-address 0x20` · `--lcd-port N` · `--lcd-expander PCF8574`
+- ⚠️ `--lcd-port`는 **보드마다 다르다**. 라즈베리파이는 `1`이지만 다른 SBC에서는
+  1번이 엉뚱한 버스(HDMI DDC 등)일 수 있다. 아래 "I2C 버스 찾기"로 확인할 것.
 - 종료 시(SIGTERM 포함) LCD를 클리어하고 닫는다.
 - ⚠️ 같은 LCD에 쓰는 다른 프로세스(별도 스크립트·cron 등)는 **반드시 중지**할 것.
   두 프로세스가 동시에 쓰면 표시가 깨진다.
+
+### I2C 버스 찾기
+
+버스 번호는 보드·커널마다 다르므로 이름으로 확인한다.
+
+```sh
+for d in /sys/class/i2c-dev/*; do
+  echo "$(basename $d): $(cat $d/name) -> $(basename $(readlink -f $d/device))"
+done
+```
+
+핀 헤더에 연결된 버스를 고른 뒤 스캔한다(PCF8574는 보통 `0x20` 또는 `0x27`).
+
+```sh
+i2cdetect -y <버스번호> 0x20 0x3f
+```
+
+`UU`는 커널 드라이버가 이미 점유한 주소라는 뜻이다(예: 전원관리칩). LCD가 아니다.
+
+사용자를 `i2c` 그룹에 넣어야 서비스가 `/dev/i2c-*`에 접근할 수 있다
+(`/dev/i2c-*`는 `root:i2c 660`). 재로그인 필요.
+
+```sh
+sudo usermod -aG i2c $USER
+```
+
+### Orange Pi Zero 3 (Allwinner H618)
+
+기본 상태에서는 핀 헤더 I2C가 **꺼져 있다**. 노출된 `/dev/i2c-0`은 PMIC 전용
+내부 버스, `/dev/i2c-1`은 HDMI DDC라 **둘 다 LCD용이 아니다.**
+
+26핀 헤더의 I2C는 `i2c3` = PH5(SDA, 핀3) / PH4(SCK, 핀5)이고,
+오버레이로 켜야 한다. 적용 후 재부팅하면 보통 `/dev/i2c-2`로 올라온다.
+
+```sh
+sudo cp /boot/armbianEnv.txt /boot/armbianEnv.txt.bak
+echo 'overlays=i2c3-ph' | sudo tee -a /boot/armbianEnv.txt
+sudo reboot
+```
+
+| 헤더 핀 | 연결 |
+|---------|------|
+| 1 | 3.3V |
+| 2 / 4 | 5V |
+| **3** | **SDA (PH5)** |
+| **5** | **SCL (PH4)** |
+| 6 | GND |
+
+> **`I2C bus locked, block: 1` 이 반복된다면** SDA/SCL이 low에 붙은 것이다.
+> 이 보드의 i2c3 핀에는 내부 풀업이 없어서 버스를 high로 올리는 것은 전적으로
+> LCD 백팩 모듈의 풀업 저항이다. 즉 **모듈 전원(VCC/GND)이나 배선을 먼저 의심**할 것.
+> 26핀 헤더라 40핀 라즈베리파이 감각으로 세면 어긋나기 쉽다.
+
+> 부팅 로그의 `Error applying setting, reverse things back`는 무시해도 된다.
+> 정상 동작하는 uart0·mmc에도 똑같이 찍히는 sunxi 커널 노이즈다.
 
 ## HTTP API
 

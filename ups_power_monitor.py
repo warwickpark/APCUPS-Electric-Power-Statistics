@@ -12,6 +12,7 @@
 """
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -358,6 +359,17 @@ def get_ip():
 
 
 def get_cpu_temp():
+    """thermal_zone0이 보드마다 CPU가 아니다(OPi Zero 3는 gpu-thermal).
+    type으로 cpu-thermal 존을 찾고, 못 찾으면 zone0으로 폴백."""
+    for zone in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+        try:
+            with open(os.path.join(zone, "type")) as f:
+                if f.read().strip() != "cpu-thermal":
+                    continue
+            with open(os.path.join(zone, "temp")) as f:
+                return round(int(f.read()) / 1000, 1)
+        except (OSError, ValueError):
+            continue
     try:
         with open("/sys/class/thermal/thermal_zone0/temp") as f:
             return round(int(f.read()) / 1000, 1)
@@ -425,7 +437,7 @@ class LcdDisplay:
             ("IP:", get_ip()),
 
             (datetime.now().strftime("%Y/%m/%d %H:%M"),
-             f"RPi TEMP:  {get_cpu_temp()}C"),
+             f"CPU TEMP:  {get_cpu_temp()}C"),
 
             (f"POWER: {watts:.1f}W" if watts is not None else "POWER: --",
              f"TODAY: {s.get('today_kwh', 0.0):.2f}kWh"),
