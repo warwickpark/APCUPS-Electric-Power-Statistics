@@ -3,7 +3,11 @@
 LOADPCT와 LINEV를 변동시키고, 가끔 전압 저하/배터리 전환을 섞는다.
 
 NUMXFERS는 상태 파일에 누적된다(공급전원 이벤트 검증용).
-상태 파일 경로는 FAKE_UPS_STATE 환경변수로 바꿀 수 있다.
+
+환경변수:
+  FAKE_UPS_STATE     상태 파일 경로
+  FAKE_UPS_SAG_PROB  호출당 전압 이상 확률 (기본 0.08 — 테스트용으로 과하게 잡은 값.
+                     데모처럼 오래 굴릴 때는 0.01 정도가 현실적이다)
 
 사용: python ups_power_monitor.py status --apcaccess "python tools/fake_apcaccess.py"
 """
@@ -16,7 +20,7 @@ from datetime import datetime
 
 STATE = os.environ.get(
     "FAKE_UPS_STATE", os.path.join(tempfile.gettempdir(), "fake_apcaccess.json"))
-SAG_PROBABILITY = 0.08  # 호출당 전압 이상 발생 확률
+SAG_PROBABILITY = float(os.environ.get("FAKE_UPS_SAG_PROB", "0.08"))
 
 state = {"numxfers": 2, "cumonbatt": 38}
 try:
