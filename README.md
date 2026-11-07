@@ -219,19 +219,19 @@ python3 ups_power_monitor.py tui
 
 ### LCD 준비
 
-1. **드라이버** — 콘솔이 LCD로 나오게 만드는 단계. TUI 자체는 보드와 무관하다.
-   - **라즈베리파이** — lcdwiki 안내대로 [LCD-show](https://github.com/goodtft/LCD-show)의
-     `sudo ./LCD35-show 90`(가로 480x320).
-     > ⚠️ LCD-show는 구형(레거시 fbdev) Raspberry Pi OS 기준이다. Bookworm 이후(KMS)에서는
-     > 부팅 설정을 깨뜨리는 사례가 많으니 백업 후 진행하거나, `config.txt`에
-     > `dtoverlay=piscreen,speed=16000000,rotate=90` 같은 오버레이로 대체를 검토할 것.
-   - **Orange Pi Zero 3 (H618)** — LCD-show는 **동작하지 않는다**(RPi 전용 스크립트).
-     26핀 헤더라 물리적으로는 꽂히지만, ILI9486(SPI1) + XPT2046(두 번째 CS, PENIRQ GPIO)용
-     **디바이스 트리 오버레이를 직접 작성**해 `armbian-add-overlay`로 넣어야 한다.
-     검증된 완성본은 없고, 커뮤니티에서도 디스플레이는 되지만 터치가 안 되는 사례가 있다
-     ([Armbian 포럼 #46824](https://forum.armbian.com/topic/46824-orange-pi-zero-3-ili9486-tft-lcd),
-     [#48026](https://forum.armbian.com/topic/48026-how-to-use-xpt2046-touch-controller-35inch-rpi-display-480x320-pixels/)).
-     터치가 안 되면 `--touch none --cycle 10`(자동 순환)으로 운용하면 된다.
+1. **드라이버 (라즈베리파이 3B+ 기준)** — 콘솔이 LCD로 나오게 만드는 단계.
+   - **Bookworm 이후** — LCD-show 대신 커널 내장 오버레이를 쓴다. `/boot/firmware/config.txt`:
+     ```ini
+     #dtoverlay=vc4-kms-v3d          # 켜져 있으면 검은 화면으로 부팅되는 사례가 있음
+     dtoverlay=piscreen,drm,speed=16000000,rotate=90
+     ```
+     `/boot/firmware/cmdline.txt` **한 줄 끝에** ` fbcon=map:10` 추가
+     (콘솔이 안 나오면 `map:11`). 색이 깨지면 `speed`를 낮춘다.
+   - **Bullseye 이전(레거시)** — lcdwiki 안내대로 [LCD-show](https://github.com/goodtft/LCD-show)의
+     `sudo ./LCD35-show 90`. Bookworm에서 돌리면 부팅 설정이 깨지는 사례가 많다.
+   - MPI3501은 piscreen/tft35a 계열과 핀이 같다고 알려져 있으나, 이 저장소에서 실기 검증은 하지 않았다.
+   > 다른 보드(예: Orange Pi Zero 3)는 RPi용 오버레이·LCD-show가 맞지 않아 디바이스 트리
+   > 오버레이를 직접 써야 한다. 이런 보드는 16x2 LCD(`--lcd`)를 쓰는 편이 현실적이다.
 2. **콘솔 폰트** — `sudo dpkg-reconfigure console-setup` → UTF-8 / Terminus.
    480x320 기준 `8x16` → **60x20**(권장), `10x20` → 48x16, `12x24` → 40x13.
 3. **서비스 등록** — tty1에 TUI를 띄우고 로그인 프롬프트는 끈다.
@@ -246,6 +246,7 @@ sudo systemctl enable --now ups-power-tui
 > `█ ▄ ░`(CP437 범위)가 깨져 보이면 `ExecStart`에 `--ascii`를 추가.
 > 콘솔 화면 꺼짐(blank)은 TUI가 기동 시 해제한다(`--no-blank-off`로 끔).
 > 수집기(`ups-power-monitor`)와는 별개 프로세스라 TUI가 죽어도 수집에는 영향이 없다.
+> 이 패널만 쓰고 16x2 LCD가 없는 보드라면 수집기 유닛의 `ExecStart`에서 `--lcd`를 뺄 것.
 
 ## HTTP API
 
