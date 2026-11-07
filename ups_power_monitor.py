@@ -1199,6 +1199,11 @@ def main():
                    help="터치 입력 장치: auto(기본) | none | /dev/input/eventN")
     t.add_argument("--ascii", action="store_true",
                    help="블록 문자(█▄░) 대신 ASCII 사용 (콘솔 폰트가 깨질 때)")
+    t.add_argument("--graph", default="auto",
+                   choices=("auto", "block", "half", "shade", "ascii"),
+                   help="막대 한 칸의 세로 해상도 — block=1/8블록(8단계, 해당 "
+                        "글리프를 가진 폰트 필요), half=반칸(2단계), "
+                        "shade=음영 ░▒█(3단계), auto=콘솔이면 shade")
     t.add_argument("--mono", action="store_true", help="색상 끔")
     t.add_argument("--no-blank-off", action="store_true",
                    help="리눅스 콘솔 화면 꺼짐(blank) 해제를 하지 않음")
