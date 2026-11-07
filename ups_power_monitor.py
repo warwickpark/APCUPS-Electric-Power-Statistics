@@ -6,6 +6,7 @@
   collect   상시 수집 + 웹 대시보드 + LCD 표시(--lcd) (systemd 서비스용)
   stats     CLI 통계 리포트
   status    apcaccess 1회 파싱해 현재 상태 출력 (DB 불필요)
+  tui       3.5인치 SPI LCD 등 콘솔용 TUI 대시보드 (ups_tui.py)
 
 표준 라이브러리만 사용. DB는 SQLite(WAL) — 외부 프로그램이 읽기 전용으로
 동시 접근 가능하며 스키마는 README.md에 문서화되어 있다.
@@ -701,6 +702,23 @@ def main():
     st = sub.add_parser("status", parents=[common],
                         help="현재 상태 1회 출력 (DB 불필요)")
     st.set_defaults(fn=cmd_status)
+
+    t = sub.add_parser("tui", parents=[common],
+                       help="콘솔 TUI 대시보드 (3.5인치 SPI LCD용, ups_tui.py)")
+    t.add_argument("--cycle", type=float, default=0,
+                   help="페이지 자동 순환 주기(초), 0=끔 (기본)")
+    t.add_argument("--ups-interval", type=float, default=15,
+                   help="apcaccess 조회 주기(초), 기본 15")
+    t.add_argument("--no-apcaccess", action="store_true",
+                   help="apcaccess를 호출하지 않고 DB 값만 표시")
+    t.add_argument("--touch", default="auto",
+                   help="터치 입력 장치: auto(기본) | none | /dev/input/eventN")
+    t.add_argument("--ascii", action="store_true",
+                   help="블록 문자(█▄░) 대신 ASCII 사용 (콘솔 폰트가 깨질 때)")
+    t.add_argument("--mono", action="store_true", help="색상 끔")
+    t.add_argument("--no-blank-off", action="store_true",
+                   help="리눅스 콘솔 화면 꺼짐(blank) 해제를 하지 않음")
+    t.set_defaults(fn=lambda a: __import__("ups_tui").cmd_tui(a))
 
     args = p.parse_args()
     args.fn(args)

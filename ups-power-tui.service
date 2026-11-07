@@ -1,0 +1,25 @@
+[Unit]
+Description=UPS Power Monitor TUI on tty1 (3.5inch SPI LCD)
+After=ups-power-monitor.service systemd-user-sessions.service
+# tty1의 로그인 프롬프트(getty)와 화면을 다투지 않도록
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=warwick
+# 터치(evdev) 읽기 권한
+SupplementaryGroups=input
+WorkingDirectory=/home/warwick/ups-power-monitor
+ExecStart=/usr/bin/python3 /home/warwick/ups-power-monitor/ups_power_monitor.py tui
+Environment=TERM=linux LANG=C.UTF-8
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
