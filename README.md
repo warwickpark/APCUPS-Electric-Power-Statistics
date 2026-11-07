@@ -9,7 +9,7 @@
 
 apcupsd가 붙어 있는 라즈베리파이에서 상시 실행되며, `apcaccess`의 `LOADPCT`(부하 %)와
 `NOMPOWER`(정격 전력)로 소비 전력을 계산해 SQLite에 적산한다. 통계는 **웹 대시보드**,
-**CLI**, **16x2 문자 LCD** 세 가지로 확인할 수 있고, 서비스 하나(`collect`)가 이 셋을 모두 구동한다.
+**CLI**, **16x2 문자 LCD**, **콘솔 TUI**(3.5인치 SPI LCD용)로 확인할 수 있고, 서비스 하나(`collect`)가 이 셋을 모두 구동한다.
 
 전원을 제어하는 호스트에서 돌아가는 것을 전제로, 예기치 못한 정전에도 DB가 깨지지 않도록
 설계했다(WAL + `synchronous=FULL`, 기동 시 자가 복구, 일일 백업).
@@ -22,6 +22,7 @@ apcupsd가 붙어 있는 라즈베리파이에서 상시 실행되며, `apcacces
   정상 범위 이탈률, 전압 저하·상승·배터리 전환 이벤트 로그
 - 🌐 **웹 대시보드** — 의존성 없는 단일 HTML, 라이트·다크 모드, 오프라인 동작
 - 🖥️ **LCD 표시** — 기존 16x2 I2C 문자 LCD에 상태·전력을 순환 표시
+- 📟 **TUI** — 3.5인치 SPI LCD(480x320) 콘솔용 curses 대시보드, 터치로 페이지 전환
 - 🗄️ **개방형 저장소** — WAL 모드 SQLite + 편의 VIEW로 외부 프로그램이 직접 조회
 - 🛡️ **내결함성** — 정전에도 DB 무손상, 손상 시 백업 자동 복원, 기동 실패로 호스트 운영 방해 없음
 - 🐍 **무의존성** — Python 3 표준 라이브러리만 사용(LCD 쓸 때만 `RPLCD` 선택)
@@ -84,6 +85,7 @@ systemctl status ups-power-monitor
 | `stats` | 실시간·시간별(24h)·일별(30일)·월별(12개월) 통계와 오늘·이번 달 누적 kWh 출력 |
 | `quality` | 공급전원 보고서 — 입력 전압 단기/장기 변동 + 이벤트. `--hours`(기본 24), `--days`(기본 30), `--max-events`(기본 30) |
 | `status` | `apcaccess`를 1회 파싱해 현재 상태 출력 (DB 불필요, 설치 확인용) |
+| `tui` | 콘솔 TUI 대시보드 (아래 [TUI](#tui-35인치-spi-lcd) 참고) |
 
 **공통 옵션** — `--db 경로`(기본: 스크립트 옆 `ups_power.db`), `--apcaccess 명령`,
 `--nominal-power W`(`NOMPOWER`를 보고하지 않는 기종용),
@@ -187,6 +189,65 @@ sudo reboot
 > 부팅 로그의 `Error applying setting, reverse things back`는 무시해도 된다.
 > 정상 동작하는 uart0·mmc에도 똑같이 찍히는 sunxi 커널 노이즈다.
 
+## TUI (3.5인치 SPI LCD)
+
+[3.5inch RPi Display](https://www.lcdwiki.com/3.5inch_RPi_Display)(MPI3501, 480x320,
+ILI9486 + XPT2046 터치) 같은 프레임버퍼 LCD의 리눅스 콘솔에 띄우는 curses 대시보드.
+표준 라이브러리만 쓰며, 일반 SSH 터미널에서도 그대로 동작한다.
+
+```sh
+python3 ups_power_monitor.py tui
+```
+
+| 페이지 | 내용 |
+|--------|------|
+| `1 NOW` | 상태·모델, **큰 글씨 전력(W)**, 오늘/이번 달 kWh, 부하·배터리 막대, 런타임·전압, 최근 60분 추이 |
+| `2 HOUR` | 최근 24시간 평균 W 막대그래프 + 합계 kWh |
+| `3 DAY` | 최근 30일 kWh 막대그래프 + 일평균 |
+| `4 MONTH` | 월별 누적 kWh 가로 막대 (진행 중인 달 `*`) |
+| `5 VOLT` | 24시간 입력 전압 요약(평균·최소·최대·표준편차·이탈률), 시간별 최소~최대 밴드, 최근 이벤트 |
+| `6 SYS` | 호스트·IP·CPU 온도·업타임·샘플 경과·DB 크기·UPS 전환 이력 |
+
+- **조작** — `←/→`(`h/l`, `Space`) 이동 · `1~6` 직접 선택 · `r` 새로고침 · `q` 종료
+- **터치** — 화면 탭 = 다음 페이지. `/proc/bus/input/devices`에서 ADS7846/XPT2046을 찾아
+  evdev를 직접 읽는다(좌표 보정 불필요, `input` 그룹 권한 필요). `--touch none|/dev/input/eventN`
+- **데이터** — 통계는 DB를 읽기 전용으로 조회(5초 주기), 배터리·전압 등 실시간 값은
+  `apcaccess`를 별도로 조회(`--ups-interval`, 기본 15초). 실패하면 DB 최신 샘플로 대체하고
+  하단에 경고를 띄운다. `--no-apcaccess`로 끌 수 있다.
+- **옵션** — `--cycle 10`(페이지 자동 순환) · `--ascii`(블록 문자 대신 `#`) · `--mono`
+- 화면 크기에 맞춰 레이아웃이 바뀐다 (최소 30x8, 큰 글씨는 36x16 이상).
+
+### LCD 준비
+
+1. **드라이버 (라즈베리파이 3B+ 기준)** — 콘솔이 LCD로 나오게 만드는 단계.
+   - **Bookworm 이후** — LCD-show 대신 커널 내장 오버레이를 쓴다. `/boot/firmware/config.txt`:
+     ```ini
+     #dtoverlay=vc4-kms-v3d          # 켜져 있으면 검은 화면으로 부팅되는 사례가 있음
+     dtoverlay=piscreen,drm,speed=16000000,rotate=90
+     ```
+     `/boot/firmware/cmdline.txt` **한 줄 끝에** ` fbcon=map:10` 추가
+     (콘솔이 안 나오면 `map:11`). 색이 깨지면 `speed`를 낮춘다.
+   - **Bullseye 이전(레거시)** — lcdwiki 안내대로 [LCD-show](https://github.com/goodtft/LCD-show)의
+     `sudo ./LCD35-show 90`. Bookworm에서 돌리면 부팅 설정이 깨지는 사례가 많다.
+   - MPI3501은 piscreen/tft35a 계열과 핀이 같다고 알려져 있으나, 이 저장소에서 실기 검증은 하지 않았다.
+   > 다른 보드(예: Orange Pi Zero 3)는 RPi용 오버레이·LCD-show가 맞지 않아 디바이스 트리
+   > 오버레이를 직접 써야 한다. 이런 보드는 16x2 LCD(`--lcd`)를 쓰는 편이 현실적이다.
+2. **콘솔 폰트** — `sudo dpkg-reconfigure console-setup` → UTF-8 / Terminus.
+   480x320 기준 `8x16` → **60x20**(권장), `10x20` → 48x16, `12x24` → 40x13.
+3. **서비스 등록** — tty1에 TUI를 띄우고 로그인 프롬프트는 끈다.
+
+```sh
+sudo cp ups-power-tui.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ups-power-tui
+```
+
+> 리눅스 콘솔 폰트에는 **한글 글리프가 없어서** TUI 화면 문자열은 영문만 쓴다.
+> `█ ▄ ░`(CP437 범위)가 깨져 보이면 `ExecStart`에 `--ascii`를 추가.
+> 콘솔 화면 꺼짐(blank)은 TUI가 기동 시 해제한다(`--no-blank-off`로 끔).
+> 수집기(`ups-power-monitor`)와는 별개 프로세스라 TUI가 죽어도 수집에는 영향이 없다.
+> 이 패널만 쓰고 16x2 LCD가 없는 보드라면 수집기 유닛의 `ExecStart`에서 `--lcd`를 뺄 것.
+
 ## HTTP API
 
 대시보드가 쓰는 JSON API. 외부에서도 그대로 호출할 수 있다.
@@ -279,6 +340,7 @@ python ups_power_monitor.py collect --apcaccess "python tools/fake_apcaccess.py"
 python tools/backfill_test_data.py
 python ups_power_monitor.py stats
 python ups_power_monitor.py quality
+python ups_power_monitor.py tui --apcaccess "python tools/fake_apcaccess.py"
 ```
 
 `tools/fake_apcaccess.py`는 전압을 변동시키고 가끔 저하·배터리 전환을 섞으므로
@@ -287,12 +349,14 @@ python ups_power_monitor.py quality
 ## 프로젝트 구조
 
 ```
-ups_power_monitor.py          메인 프로그램 (collect / stats / quality / status)
+ups_power_monitor.py          메인 프로그램 (collect / stats / quality / status / tui)
+ups_tui.py                    콘솔 TUI (3.5인치 SPI LCD용)
 static/index.html             웹 대시보드 — 전력 사용량
 static/power-quality.html     웹 대시보드 — 공급전원 보고서
 static/common.css             두 페이지 공용 스타일
 static/common.js              두 페이지 공용 차트·유틸 (의존성 없음, 오프라인 동작)
-ups-power-monitor.service     systemd 유닛
+ups-power-monitor.service     systemd 유닛 (수집기)
+ups-power-tui.service         systemd 유닛 (tty1 TUI)
 tools/fake_apcaccess.py       개발용 가짜 apcaccess
 tools/backfill_test_data.py   개발용 합성 데이터 주입
 ```
